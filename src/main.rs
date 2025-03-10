@@ -2,6 +2,13 @@ use rfd::FileDialog;
 use std::{fs::create_dir, path::PathBuf};
 use xdg_home::home_dir;
 use iced::{Task, Color, widget::{button, column, text, Column}};
+use iced_aw::{
+    menu::{self, Item, Menu},
+    style::{menu_bar::primary, Status},
+    menu_bar, menu_items,
+    quad, widgets::InnerBounds,
+};
+
 
 fn get_target_dir_from_user() -> Option<PathBuf> {
     FileDialog::new().pick_folder()
@@ -34,10 +41,17 @@ enum Message {
 
 impl State {
     pub fn view(&self) -> Column<Message> {
+        let file_menu = |items| Menu::new(items).max_width(450.0).offset(15.0).spacing(5.0);
+        let top_menu = menu_bar!(
+            (text("File"), file_menu(menu_items!(
+                (button("Deduplicate Directory").on_press(Message::GetWorkDir))))
+            ))
+            .draw_path(menu::DrawPath::Backdrop);
         match self {
             State::Init(init) => {
                 if let Err(path) = &init.problem {
                     column![
+                        top_menu,
                         text(match path {
                             None => "Failed to get target folder from file picker! Try again.".to_owned(),
                             Some(path) => format!("Folder '{:}' does not exist! Try again.", path.to_str().unwrap_or("<directory>")),
@@ -47,6 +61,7 @@ impl State {
                     ]
                 } else {
                     column![
+                        top_menu,
                         text(format!("Configuration Folder: {:}", init.config.conf_dir.to_str().unwrap_or("<directory>"))).size(50),
                         button("Choose Folder").on_press(Message::GetWorkDir),
                     ]
@@ -54,6 +69,7 @@ impl State {
             },
             State::Work(work) => {
                 column![
+                    top_menu,
                     text(format!("Configuration Folder: {:}", work.config.conf_dir.to_str().unwrap_or("<directory>"))).size(50),
                     text(format!("Folder for deduplication: {:}", work.path.to_str().unwrap_or("<directory>"))).size(50),
                 ]
