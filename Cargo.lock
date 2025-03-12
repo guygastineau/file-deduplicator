@@ -1046,6 +1046,7 @@ dependencies = [
  "iced_aw",
  "rfd",
  "sha2",
+ "walkdir",
  "xdg-home",
 ]
 
