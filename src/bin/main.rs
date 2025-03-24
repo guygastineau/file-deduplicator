@@ -9,9 +9,6 @@ use iced_aw::{
     quad, widgets::InnerBounds,
 };
 
-mod relate;
-
-
 fn get_target_dir_from_user() -> Option<PathBuf> {
     FileDialog::new().pick_folder()
 }
