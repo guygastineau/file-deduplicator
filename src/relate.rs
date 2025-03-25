@@ -168,6 +168,7 @@ impl WalkInfo {
     }
 }
 
+#[derive(Debug)]
 pub struct RelatedFiles {
     pub files: HashMap<String, HashSet<FileInfo>>,
     pub errors: Vec<Error>,

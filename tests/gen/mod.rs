@@ -79,6 +79,10 @@ impl Cfg {
             )
         }
     }
+
+    pub fn file_count(&self) ->  u64 {
+        self.file_count
+    }
 }
 
 struct RandReader<'a, R: Rng> {
@@ -93,14 +97,14 @@ impl<'a, R: Rng> std::io::Read for RandReader<'a, R> {
         } else {
             buf.len()
         };
-        eprintln!("Writing {:} bytes from src of size {:} to buffer of size {:}", n, self.size, buf.len());
+        println!("Writing {:} bytes from src of size {:} to buffer of size {:}", n, self.size, buf.len());
         if n == 0 {
             return Ok(0);
         }
         self.rng.fill_bytes(&mut buf[0..n]);
-        eprintln!("Bytes written");
+        println!("Bytes written");
         self.size = self.size - n;
-        eprintln!("New size is {:}", self.size);
+        println!("New size is {:}", self.size);
         Ok(n)
     }
 }
@@ -112,12 +116,12 @@ pub fn gen<'a>(base_path: &'a str, cfg: Cfg) -> Option<GenInfo> {
     if let Ok(_) = std::fs::create_dir(base_path) {
         for dir in DIRS {
             if let Err(_) = std::fs::create_dir(format!("{:}/{:}", base_path, dir)) {
-                eprintln!("Failed to create directory {:}", format!("{:}/{:}", base_path, dir));
+                println!("Failed to create directory {:}", format!("{:}/{:}", base_path, dir));
                 return None;
             }
         }
     } else {
-        eprintln!("Failed to create base directory {:}", base_path);
+        println!("Failed to create base directory {:}", base_path);
         return None;
     }
     // Write the random contents to the first file, then we copy that file to all equal files.
@@ -128,40 +132,40 @@ pub fn gen<'a>(base_path: &'a str, cfg: Cfg) -> Option<GenInfo> {
         };
         let mut group = group.iter();
         let first_path = group.next().expect("There are no file groups");
-        eprintln!("Creating first file for group {:}", first_path);
+        println!("Creating first file for group {:}", first_path);
         match std::fs::File::create(first_path) {
             Err(_) => {
-                eprintln!("Failed to open file {:}", first_path);
+                println!("Failed to open file {:}", first_path);
                 return None;
             },
             Ok(mut file) => {
                 if let Ok(written) = std::io::copy(&mut contents, &mut file) {
                     if written != *size as u64 {
-                        eprintln!("Failed to write {:} bytes to file {:}", *size, first_path);
+                        println!("Failed to write {:} bytes to file {:}", *size, first_path);
                         return None;
                     }
                 } else {
-                    eprintln!("Failed to write to {:}", first_path);
+                    println!("Failed to write to {:}", first_path);
                     return None;
                 }
             },
         }
         for path in group {
-            eprintln!("Copying to file {:}", path);
+            println!("Copying to file {:}", path);
             match std::fs::File::create(path) {
                 Err(_) => {
-                    eprintln!("Failed to open file {:}", path);
+                    println!("Failed to open file {:}", path);
                     return None;
                 },
                 Ok(mut file) => {
                     let mut first = std::fs::File::open(first_path).expect(&format!("Failed to read file {:}", first_path));
                     if let Ok(written) = std::io::copy(&mut first, &mut file) {
                         if written != *size as u64 {
-                            eprintln!("Failed to write {:} bytes to file {:}", *size, path);
+                            println!("Failed to write {:} bytes to file {:}", *size, path);
                             return None;
                         }
                     } else {
-                        eprintln!("Failed to copy bytes to {:}", path);
+                        println!("Failed to copy bytes to {:}", path);
                         return None;
                     }
                 }
