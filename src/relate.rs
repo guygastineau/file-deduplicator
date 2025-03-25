@@ -95,15 +95,15 @@ pub fn file_content_equal<'a>(file_a: &'a HashedFile, file_b: &'a HashedFile) ->
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileInfo {
-    name: PathBuf,
-    size: u64,
-    created: time::SystemTime,
+    pub name: PathBuf,
+    pub size: u64,
+    pub created: time::SystemTime,
 }
 
 pub struct WalkInfo {
-    total_size: u64,
-    files: HashSet<FileInfo>,
-    errors: Vec<Error>,
+    pub total_size: u64,
+    pub files: HashSet<FileInfo>,
+    pub errors: Vec<Error>,
 }
 
 impl FileInfo {
@@ -154,6 +154,18 @@ impl WalkInfo {
             }
         }
     }
+
+    /// Return all unique PathBufs found recursively in `path'.
+    pub fn walk(path: PathBuf) -> Self {
+        WalkDir::new(path)
+            .into_iter()
+            .fold(WalkInfo::new(), |acc, entry| {
+                match entry {
+                    Err(e) => acc.insert_error(Error { path: "<no path>".to_owned().into(), error_type: ErrorType::IO(e.into()) }),
+                    Ok(entry) => acc.insert_entry(entry),
+                }
+            })
+    }
 }
 
 pub struct RelatedFiles {
@@ -162,7 +174,7 @@ pub struct RelatedFiles {
 }
 
 impl RelatedFiles {
-    fn relate<'a>(walk: WalkInfo, conf: &'a RelateConf, report: Sender<f32>) -> Self {
+    pub fn relate<'a, 'b>(walk: &'a WalkInfo, conf: &'b RelateConf, report: Sender<f32>) -> Self {
         if walk.total_size as usize > conf.size_threshold && walk.files.len() > conf.size_threshold {
             return Self::relate_sequential(walk, report);
         }
@@ -172,9 +184,9 @@ impl RelatedFiles {
         let mut threads = Vec::new();
         let total = walk.total_size;
         let chunk_size = total / conf.max_threads as u64;
-        for chunk in &walk.files.into_iter().chunks(if chunk_size > 1 { chunk_size as usize } else { 1 }) {
+        for chunk in &walk.files.iter().chunks(if chunk_size > 1 { chunk_size as usize } else { 1 }) {
             let tx = tx.clone();
-            let chunk = chunk.into_iter().collect::<Vec<FileInfo>>();
+            let chunk = chunk.into_iter().cloned().collect::<Vec<FileInfo>>();
             let child = thread::spawn(move || {
                 chunk.into_iter().for_each(|info| {
                     let file = hash_from_file_info(&info);
@@ -214,18 +226,18 @@ impl RelatedFiles {
         }
         report.send(1.0).expect("Failed to send results to parent!");
         threads.into_iter().for_each(|th| {
-            th.join();
+            let _ = th.join();
         });
         Self { files, errors }
     }
 
-    fn relate_sequential(walk: WalkInfo, report: Sender<f32>) -> Self {
+    pub fn relate_sequential<'a>(walk: &'a WalkInfo, report: Sender<f32>) -> Self {
         let mut done = 0;
         let total = walk.total_size;
         let mut files: HashMap<String, HashSet<FileInfo>> = HashMap::new();
         let mut errors = Vec::new();
         walk.files
-            .into_iter()
+            .iter()
             .for_each(|info| {
                 match hash_from_file_info(&info) {
                     Err(err) => {
@@ -251,25 +263,13 @@ impl RelatedFiles {
     }
 }
 
-/// Return all unique PathBufs found recursively in `path'.
-pub fn walk(path: PathBuf) -> WalkInfo {
-    WalkDir::new(path)
-        .into_iter()
-        .fold(WalkInfo::new(), |acc, entry| {
-            match entry {
-                Err(e) => acc.insert_error(Error { path: "<no path>".to_owned().into(), error_type: ErrorType::IO(e.into()) }),
-                Ok(entry) => acc.insert_entry(entry),
-            }
-        })
-}
-
 /// Configure the relating process, since it could be expensive with lots of large files.
 pub struct RelateConf {
     /// Max number of threads to utilize when it is deemed worthwhile.
     /// `0` will be changed to 1.
-    max_threads: u16,
+    pub max_threads: u16,
     /// How many files present before parallelizing.
-    file_threshold: usize,
+    pub file_threshold: usize,
     /// Total size of files before parallelizing.
-    size_threshold: usize,
+    pub size_threshold: usize,
 }

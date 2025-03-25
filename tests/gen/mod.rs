@@ -4,13 +4,11 @@ use itertools::Itertools;
 
 pub type GenInfo = BTreeSet<(usize, BTreeSet<String>)>;
 
-const GROUP_M: u8 = 50;
-
 const DIRS: [&'static str; 9] = [
     "abc",
     "def",
     "ghi",
-    "abd/def",
+    "abc/def",
     "abc/ghi",
     "def/ghi",
     "ghi/abc",
@@ -20,20 +18,20 @@ const DIRS: [&'static str; 9] = [
 
 
 
-fn grouped_names<'a, 'b>(rng: &'a mut impl rand::Rng, dir: &'b str, n: usize) -> impl Iterator<Item=BTreeSet<String>> {
+fn grouped_names<'a, 'b>(rng: &'a mut impl rand::Rng, dir: &'b str, n: usize, group_m: u64) -> impl Iterator<Item=BTreeSet<String>> {
     let mut filenames: Vec<String> = (0..n)
         .map(|x| format!("{:}.txt", x))
         .collect();
     filenames.shuffle(rng);
     let prefixes = (0..).into_iter().flat_map(|_| DIRS.into_iter());
     let mut rng = rand::rng();
-    let mut map: HashMap<u8,BTreeSet<String>> = HashMap::new();
+    let mut map: HashMap<usize,BTreeSet<String>> = HashMap::new();
     for (prefix, filename) in prefixes
         .into_iter()
         .zip(filenames)
     {
-        let group = rng.random::<u8>() % GROUP_M;
-        let path = format!("{:}/{:}", prefix, filename);
+        let group = (rng.random::<u64>() % group_m) as usize;
+        let path = format!("{:}/{:}/{:}", dir, prefix, filename);
         if let Some(set) = map.get_mut(&group) {
             set.insert(path);
         } else {
@@ -49,14 +47,15 @@ fn groups<'a>(cfg: &'a Cfg, it: impl Iterator<Item=BTreeSet<String>>) -> GenInfo
     let mut rng = rand::rng();
     let mut xs = BTreeSet::new();
     for group in it {
-        let mut size: u64 = rng.random();
-        while size < cfg.min_size && size > cfg.max_size - 1 {
-            size = rng.random();
+        let mut size: u64 = rng.random::<u64>() % cfg.max_size;
+        while size < cfg.min_size {
+            size = rng.random::<u64>() % cfg.max_size;
         }
         xs.insert((size as usize, group));
     }
     xs
 }
+
 
 pub struct Cfg {
     file_count: u64,
@@ -65,18 +64,20 @@ pub struct Cfg {
     max_size: u64,
 }
 
-pub fn new_conf(file_count: u64, group_count: u64, min_size: u64, max_size: u64) -> Option<Cfg>{
-    if min_size >= max_size {
-        None
-    } else {
-        Some(
-            Cfg {
-                file_count,
-                group_count,
-                min_size,
-                max_size,
-            }
-        )
+impl Cfg {
+    pub fn new(file_count: u64, group_count: u64, min_size: u64, max_size: u64) -> Option<Cfg>{
+        if min_size >= max_size {
+            None
+        } else {
+            Some(
+                Cfg {
+                    file_count,
+                    group_count,
+                    min_size,
+                    max_size,
+                }
+            )
+        }
     }
 }
 
@@ -92,23 +93,31 @@ impl<'a, R: Rng> std::io::Read for RandReader<'a, R> {
         } else {
             buf.len()
         };
+        eprintln!("Writing {:} bytes from src of size {:} to buffer of size {:}", n, self.size, buf.len());
+        if n == 0 {
+            return Ok(0);
+        }
         self.rng.fill_bytes(&mut buf[0..n]);
+        eprintln!("Bytes written");
         self.size = self.size - n;
+        eprintln!("New size is {:}", self.size);
         Ok(n)
     }
 }
 
-pub fn gen<'a>(dir: &'a str, cfg: Cfg) -> Option<GenInfo> {
+pub fn gen<'a>(base_path: &'a str, cfg: Cfg) -> Option<GenInfo> {
     let mut rng = rand::rng();
-    let groups = groups(&cfg, grouped_names(&mut rng, dir, cfg.file_count as usize));
+    let groups = groups(&cfg, grouped_names(&mut rng, base_path, cfg.file_count as usize, cfg.group_count));
     // Create all necessary directories.
-    if let Ok(_) = std::fs::create_dir(dir) {
+    if let Ok(_) = std::fs::create_dir(base_path) {
         for dir in DIRS {
-            if let Err(_) = std::fs::create_dir(dir) {
+            if let Err(_) = std::fs::create_dir(format!("{:}/{:}", base_path, dir)) {
+                eprintln!("Failed to create directory {:}", format!("{:}/{:}", base_path, dir));
                 return None;
             }
         }
     } else {
+        eprintln!("Failed to create base directory {:}", base_path);
         return None;
     }
     // Write the random contents to the first file, then we copy that file to all equal files.
@@ -117,38 +126,46 @@ pub fn gen<'a>(dir: &'a str, cfg: Cfg) -> Option<GenInfo> {
             rng: &mut rng,
             size: *size,
         };
-        let mut group = group.into_iter();
-        if let Some(mut first) = group
-            .next()
-            .map_or(None, |path| match std::fs::File::open(path) {
-                Err(_) => None,
+        let mut group = group.iter();
+        let first_path = group.next().expect("There are no file groups");
+        eprintln!("Creating first file for group {:}", first_path);
+        match std::fs::File::create(first_path) {
+            Err(_) => {
+                eprintln!("Failed to open file {:}", first_path);
+                return None;
+            },
+            Ok(mut file) => {
+                if let Ok(written) = std::io::copy(&mut contents, &mut file) {
+                    if written != *size as u64 {
+                        eprintln!("Failed to write {:} bytes to file {:}", *size, first_path);
+                        return None;
+                    }
+                } else {
+                    eprintln!("Failed to write to {:}", first_path);
+                    return None;
+                }
+            },
+        }
+        for path in group {
+            eprintln!("Copying to file {:}", path);
+            match std::fs::File::create(path) {
+                Err(_) => {
+                    eprintln!("Failed to open file {:}", path);
+                    return None;
+                },
                 Ok(mut file) => {
-                    if let Ok(written) = std::io::copy(&mut contents, &mut file) {
+                    let mut first = std::fs::File::open(first_path).expect(&format!("Failed to read file {:}", first_path));
+                    if let Ok(written) = std::io::copy(&mut first, &mut file) {
                         if written != *size as u64 {
-                            None
-                        } else {
-                            Some(file)
+                            eprintln!("Failed to write {:} bytes to file {:}", *size, path);
+                            return None;
                         }
                     } else {
-                        None
-                    }
-                },
-            })
-        {
-            for path in group {
-                match std::fs::File::open(path) {
-                    Err(_) => return None,
-                    Ok(mut file) => {
-                        if let Ok(written) = std::io::copy(&mut first, &mut file) {
-                            if written != *size as u64 {
-                                return None;
-                            }
-                        }
+                        eprintln!("Failed to copy bytes to {:}", path);
+                        return None;
                     }
                 }
             }
-        } else {
-            return None;
         }
     }
     Some(groups)
